@@ -23,12 +23,12 @@ export PATH=$PATH:/usr/local/bin
 
 os_arch=""
 [ -e /etc/os-release ] && os_id=$(cat /etc/os-release | grep ^ID= | tr '[A-Z]' '[a-z]')
-echo -e "当前系统为：${os_id}"
+echo -e "当前系统ID为：${os_id#*=}"
 
 if [[ $os_id =~ "alpine" ]]; then
     os_name='alpine'
     os_other=1
-elif [[ $(uname -o | tr '[A-Z]' '[a-z]') = "linux" ]]; then
+elif [[ $(uname -o | tr '[A-Z]' '[a-z]') =~ "linux" ]]; then
     os_name='linux'
 fi
 
@@ -150,13 +150,13 @@ install_soft() {
 version_mmon() {
     echo -e "正在获取监控Mmon版本号"
     
-    m_version=$(curl -m 10 -skL "https://api.github.com/repos/souying/serverMmon/releases" | awk -F'"' '/tag_name/ {print $4}')
+    m_version=$(curl -m 10 -skL "https://api.github.com/repos/souying/serverMmon/releases" | awk -F'"' '/tag_name/ {print $4}' | sort -u)
     if [ ! -n "$m_version" ]; then
         #m_version=$(curl -m 10 -sL "https://fastly.jsdelivr.net/gh/souying/serverMmon/" | sed -n 's/.*option value="[^@]*@\([0-9]\+\.[0-9]\+\.[0-9]\+\).*/v\1/p')
-        m_version=$(curl -m 10 -sL "https://fastly.jsdelivr.net/gh/souying/serverMmon/" | sed -nE 's/.*souying\/serverMmon@([0-9]+\.[0-9]+(\.[0-9]+)?).*/v\1/p'| sort -u) #-u去重, -r降序, 没有-r为升序
+        m_version=$(curl -m 10 -skL "https://fastly.jsdelivr.net/gh/souying/serverMmon/" | sed -nE 's/.*souying\/serverMmon@([0-9]+\.[0-9]+(\.[0-9]+)?).*/v\1/p'| sort -u) #-u去重, -r降序, 没有-r为升序
     fi
     if [ ! -n "$m_version" ]; then
-        m_version=$(curl -m 10 -sL "https://gcore.jsdelivr.net/gh/souying/serverMmon/" | sed -nE 's/.*souying\/serverMmon@([0-9]+\.[0-9]+(\.[0-9]+)?).*/v\1/p'| sort -u)
+        m_version=$(curl -m 10 -skL "https://gcore.jsdelivr.net/gh/souying/serverMmon/" | sed -nE 's/.*souying\/serverMmon@([0-9]+\.[0-9]+(\.[0-9]+)?).*/v\1/p'| sort -u)
     fi
     
     if [ ! -n "$m_version" ]; then
@@ -287,15 +287,16 @@ update_mmon() {
     [[ $? != 0 ]] && echo -e "${red}无法停止监控Mmon！退出执行${plain}" && exit 1
 
     #下载监控Mmon
-    rm -rf $MMON_MMON_PATH/*
+    rm -rf $MMON_MMON_PATH/mmon
     download_mmon
     
     #启动监控Mmon
     if [ "$os_other" != 1 ];then
         systemctl start mmon
     else
-        nohup ${MMON_MMON_PATH}/mmon >/dev/null 2>&1 &
+        cd ${MMON_MMON_PATH} && nohup ./mmon >/dev/null 2>&1 &
     fi
+    echo -e "${green}监控Mmon更新完成！${plain}"
     
     if [[ $# == 0 ]]; then
         before_show_menu
@@ -364,7 +365,7 @@ EOF
         args=" $*"
         sed -i "/ExecStart/ s/$/${args}/" ${MMON_MMON_SERVICE}
     else
-        echo "@reboot nohup ${MMON_MMON_PATH}/mmon >/dev/null 2>&1 &" >> /etc/crontabs/root
+        echo "@reboot cd ${MMON_MMON_PATH} && nohup ./mmon >/dev/null 2>&1 &" >> /etc/crontabs/root
        [[ ! $(pgrep "crond") ]] && crond
     fi
     echo -e "${green}MMON ${MMON_VERSION}${plain} 安装完成，已设置开机自启"
@@ -375,7 +376,7 @@ EOF
         systemctl enable mmon
         systemctl restart mmon
     else
-        nohup ${MMON_MMON_PATH}/mmon >/dev/null 2>&1 &
+        cd ${MMON_MMON_PATH} && nohup ./mmon >/dev/null 2>&1 &
     fi
     
     if [[ $# == 0 ]]; then
@@ -409,6 +410,7 @@ uninstall_agent() {
     
     [ -d $MMON_MMON_PATH ] && rm -rf $MMON_MMON_PATH
     clean_all
+    echo -e "${green}已成功卸载监控Mmon！${plain}"
     
     if [[ $# == 0 ]]; then
         before_show_menu
@@ -445,8 +447,8 @@ restart_agent() {
     check_mmon
     echo -e "> 重启Mmon"
     if [ "$os_other" = 1 ]; then
-        [ $(pgrep "mmon") ] && kill -s 9 $(pgrep ${MMON_PID_NAME})
-        nohup ${MMON_MMON_PATH}/mmon >/dev/null 2>&1 &
+        [ $(pgrep "mmon") ] && kill -s 9 $(pgrep "mmon")
+        cd ${MMON_MMON_PATH} && nohup ./mmon >/dev/null 2>&1 &
        [ $(pgrep "mmon") ] && echo -e "${green}已重启Mmon${plain}" || echo -e "${red}Mmon启动出错！${plain}"
     else
         systemctl restart mmon.service
@@ -461,7 +463,7 @@ stop_agent() {
     check_mmon
     echo -e "> 停止Mmon"
     if [ "$os_other" = 1 ]; then
-        [ $(pgrep "mmon") ] && kill -s 9 $(pgrep ${MMON_PID_NAME})
+        [ $(pgrep "mmon") ] && kill -s 9 $(pgrep "mmon")
         [ $(pgrep "mmon") ] && echo -e "${red}未能停止Mmon，请手动处理！！！${plain}" && return 1 || echo -e "${green}已停止Mmon${plain}"
     else
         systemctl stop mmon.service
